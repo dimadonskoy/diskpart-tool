@@ -6,11 +6,10 @@ chcp 65001 >nul 2>&1
 net session >nul 2>&1
 if %errorlevel% neq 0 (
     echo.
-    echo  ╔══════════════════════════════════════════╗
-    echo  ║  ERROR: Not running as Administrator     ║
-    echo  ╚══════════════════════════════════════════╝
-    echo.
-    echo  Right-click the file and choose "Run as administrator".
+    echo  ╔══════════════════════════════════════════════════════════════╗
+    echo  ║   ERROR: Administrator privileges required                   ║
+    echo  ║   Right-click the file and choose "Run as administrator".    ║
+    echo  ╚══════════════════════════════════════════════════════════════╝
     echo.
     pause
     exit /b 1
@@ -29,11 +28,10 @@ $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIden
     [Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $isAdmin) {
     Write-Host ""
-    Write-Host "  ╔══════════════════════════════════════════╗" -ForegroundColor Red
-    Write-Host "  ║  ERROR: Not running as Administrator     ║" -ForegroundColor Red
-    Write-Host "  ╚══════════════════════════════════════════╝" -ForegroundColor Red
+    Write-Host "  ╔════════════════════════════════════════════════════════════╗" -ForegroundColor Red
+    Write-Host "  ║   ERROR: Administrator privileges required                  ║" -ForegroundColor Red
+    Write-Host "  ╚════════════════════════════════════════════════════════════╝" -ForegroundColor Red
     Write-Host ""
-    Write-Host "  This tool requires Administrator privileges." -ForegroundColor Yellow
     Write-Host "  Right-click the file and choose 'Run as administrator'." -ForegroundColor Yellow
     Write-Host ""
     Read-Host "  Press Enter to exit" | Out-Null
@@ -46,27 +44,50 @@ $MIN_D_KEEP_GB = 2
 $LOG_DIR       = if ($env:DREPT_DIR) { $env:DREPT_DIR } else { "$env:ProgramData\DiskRepartition\Logs" }
 
 # ── UI HELPERS ─────────────────────────────────────────────────────────────────
+$BW = 60   # inner box width (chars between corner glyphs)
+
 function Show-Banner {
     Clear-Host
+    $bar   = '═' * $BW
+    $title = '  DISK REPARTITION TOOL'
+    $ver   = 'v2.0  '
+    $tline = $title + (' ' * ($BW - $title.Length - $ver.Length)) + $ver
     Write-Host ""
-    Write-Host "  ╔══════════════════════════════════════════╗" -ForegroundColor Cyan
-    Write-Host "  ║   DISK REPARTITION TOOL  v2.0            ║" -ForegroundColor Cyan
-    Write-Host "  ║   Supports MBR and GPT (UEFI) disks      ║" -ForegroundColor Cyan
-    Write-Host "  ╚══════════════════════════════════════════╝" -ForegroundColor Cyan
+    Write-Host "  ╔$bar╗" -ForegroundColor Cyan
+    Write-Host ("  ║{0}║" -f (' ' * $BW)) -ForegroundColor Cyan
+    Write-Host ("  ║{0}║" -f $tline) -ForegroundColor Cyan
+    Write-Host ("  ║{0}║" -f '  Windows C: / D: Partition Manager'.PadRight($BW)) -ForegroundColor DarkCyan
+    Write-Host ("  ║{0}║" -f '  Supports MBR and GPT (UEFI) disks'.PadRight($BW)) -ForegroundColor DarkCyan
+    Write-Host ("  ║{0}║" -f (' ' * $BW)) -ForegroundColor Cyan
+    Write-Host "  ╚$bar╝" -ForegroundColor Cyan
     Write-Host ""
 }
 
 function Write-Section([string]$title) {
-    $ts  = Get-Date -Format 'HH:mm:ss'
-    $pad = [string]('─' * [Math]::Max(2, 46 - $title.Length))
+    $ts      = Get-Date -Format 'HH:mm:ss'
+    $label   = " $title "
+    $right   = " $ts "
+    $fillLen = [Math]::Max(4, $BW - $label.Length - $right.Length)
+    $fill    = '─' * $fillLen
     Write-Host ""
-    Write-Host "  ┌─ [$ts] $title $pad" -ForegroundColor DarkCyan
+    Write-Host "  ─$label$fill$right─" -ForegroundColor DarkCyan
 }
 
-function Write-Line([string]$msg, [string]$color = 'White') { Write-Host "  │  $msg" -ForegroundColor $color }
-function Write-OK([string]$msg)   { Write-Host "  │  [OK] $msg" -ForegroundColor Green }
-function Write-Warn([string]$msg) { Write-Host "  │  [!!] $msg" -ForegroundColor Yellow }
-function Write-Fail([string]$msg) { Write-Host "  │  [XX] $msg" -ForegroundColor Red }
+function Write-Line([string]$msg, [string]$color = 'Gray') { Write-Host "        $msg" -ForegroundColor $color }
+function Write-OK([string]$msg)   { Write-Host "  [ + ] $msg" -ForegroundColor Green }
+function Write-Warn([string]$msg) { Write-Host "  [ ! ] $msg" -ForegroundColor Yellow }
+function Write-Fail([string]$msg) { Write-Host "  [ X ] $msg" -ForegroundColor Red }
+
+function Write-Step([int]$n, [int]$total, [string]$msg) {
+    $dashes = '─' * $BW
+    $prefix = "  STEP $n/$total  —  "
+    $rem    = $BW - $prefix.Length
+    $body   = if ($msg.Length -le $rem) { $msg.PadRight($rem) } else { $msg.Substring(0, $rem) }
+    Write-Host ""
+    Write-Host "  ┌$dashes┐" -ForegroundColor DarkCyan
+    Write-Host "  │$prefix$body│" -ForegroundColor Cyan
+    Write-Host "  └$dashes┘" -ForegroundColor DarkCyan
+}
 
 function Wait-Enter([string]$prompt = 'Press Enter to exit') {
     Write-Host ""
@@ -93,16 +114,23 @@ function Get-VolumeUsage([string]$letter) {
     }
 }
 
+function Get-UsageBar([int64]$used, [int64]$total, [int]$width = 12) {
+    if ($total -le 0) { return '─' * $width }
+    $pct    = [Math]::Min(1.0, $used / [double]$total)
+    $filled = [Math]::Max(0, [Math]::Min($width, [int]($pct * $width + 0.5)))
+    return ('█' * $filled) + ('░' * ($width - $filled))
+}
+
 function Show-LayoutTable([array]$parts, [string]$diskInfo) {
     Write-Host ""
     Write-Host "  $diskInfo" -ForegroundColor White
     Write-Host ""
-    Write-Host ("  {0,-5}  {1,11}  {2,11}  {3,11}  {4}" -f "Drive","Total","Used","Free","Partition Type") -ForegroundColor DarkGray
-    Write-Host "  ───────────────────────────────────────────────────────────" -ForegroundColor DarkGray
+    Write-Host ("  {0,-6}  {1,10}  {2,10}  {3,10}  {4,-12}  {5}" -f "Drive","Size","Used","Free","Usage","Type") -ForegroundColor DarkGray
+    Write-Host "  $('─' * 64)" -ForegroundColor DarkGray
     foreach ($p in $parts) {
-        $letter  = if ($p.DriveLetter) { "$($p.DriveLetter):" } else { " --" }
+        $letter  = if ($p.DriveLetter) { "$($p.DriveLetter):" } else { "──" }
         $sz      = Format-Size $p.Size
-        $u       = "--"; $fr = "--"
+        $u = "──"; $fr = "──"; $bar = '─' * 12
         $usedRaw = [int64]0
         $col     = 'DarkGray'
         if ($p.DriveLetter) {
@@ -110,36 +138,44 @@ function Show-LayoutTable([array]$parts, [string]$diskInfo) {
                 $v = Get-Volume -DriveLetter $p.DriveLetter -ErrorAction SilentlyContinue
                 if ($v) {
                     $usedRaw = $v.Size - $v.SizeRemaining
-                    $u  = Format-Size $usedRaw
-                    $fr = Format-Size $v.SizeRemaining
+                    $u   = Format-Size $usedRaw
+                    $fr  = Format-Size $v.SizeRemaining
+                    $bar = Get-UsageBar $usedRaw $v.Size 12
                 }
             } catch {}
-            if ($p.DriveLetter -eq 'C')     { $col = 'Cyan' }
-            elseif ($p.DriveLetter -eq 'D') { $col = if ($usedRaw -gt 0) { 'Yellow' } else { 'Green' } }
-            else                            { $col = 'White' }
+            $col = if     ($p.DriveLetter -eq 'C') { 'Cyan' }
+                   elseif ($p.DriveLetter -eq 'D') { if ($usedRaw -gt 0) { 'Yellow' } else { 'Green' } }
+                   else                            { 'White' }
         }
-        Write-Host ("  {0,-5}  {1,11}  {2,11}  {3,11}  {4}" -f $letter,$sz,$u,$fr,$p.Type) -ForegroundColor $col
+        Write-Host ("  {0,-6}  {1,10}  {2,10}  {3,10}  {4,-12}  {5}" -f $letter,$sz,$u,$fr,$bar,$p.Type) -ForegroundColor $col
     }
+    Write-Host ""
 }
 
 function Show-DataLossWarning([string]$drive, [double]$usedGB) {
-    Write-Host "  ╔═══════════════════════════════════════════════════════════╗" -ForegroundColor Red
-    Write-Host "  ║   !! CRITICAL WARNING — DATA LOSS !!                      ║" -ForegroundColor Red
-    Write-Host "  ║                                                           ║" -ForegroundColor Red
-    Write-Host "  ║   ${drive}: contains $usedGB GB of data that CANNOT be preserved.  ║" -ForegroundColor Red
-    Write-Host "  ║                                                           ║" -ForegroundColor Red
-    Write-Host "  ║   To resize, this tool MUST delete ${drive}: entirely.          ║" -ForegroundColor Red
-    Write-Host "  ║   This is a Windows limitation — no workaround exists.    ║" -ForegroundColor Red
-    Write-Host "  ║                                                           ║" -ForegroundColor Red
-    Write-Host "  ║   BACK UP ${drive}: NOW before continuing.                      ║" -ForegroundColor Red
-    Write-Host "  ║   Suggested command (run as admin in CMD):                ║" -ForegroundColor Red
-    Write-Host "  ║     robocopy ${drive}:\ <backup-path>\ /E /COPYALL /R:1 /W:1   ║" -ForegroundColor Yellow
-    Write-Host "  ╚═══════════════════════════════════════════════════════════╝" -ForegroundColor Red
+    $bar = '═' * $BW
+    Write-Host "  ╔$bar╗" -ForegroundColor Red
+    Write-Host ("  ║{0}║" -f (' ' * $BW)) -ForegroundColor Red
+    Write-Host ("  ║{0}║" -f "  !!  CRITICAL WARNING  —  DATA LOSS  !!".PadRight($BW)) -ForegroundColor Red
+    Write-Host ("  ║{0}║" -f (' ' * $BW)) -ForegroundColor Red
+    Write-Host ("  ║{0}║" -f "  ${drive}: contains $usedGB GB of data that CANNOT be preserved.".PadRight($BW)) -ForegroundColor Yellow
+    Write-Host ("  ║{0}║" -f "  This tool MUST delete ${drive}: entirely to resize it.".PadRight($BW)) -ForegroundColor Yellow
+    Write-Host ("  ║{0}║" -f "  This is a Windows limitation — no workaround exists.".PadRight($BW)) -ForegroundColor Yellow
+    Write-Host ("  ║{0}║" -f (' ' * $BW)) -ForegroundColor Red
+    Write-Host ("  ║{0}║" -f "  BACK UP ${drive}: NOW before continuing.".PadRight($BW)) -ForegroundColor Red
+    Write-Host ("  ║{0}║" -f "  Suggested backup command (run as admin in CMD):".PadRight($BW)) -ForegroundColor DarkGray
+    Write-Host ("  ║{0}║" -f "    robocopy ${drive}:\ <backup-path>\ /E /COPYALL /R:1 /W:1".PadRight($BW)) -ForegroundColor Yellow
+    Write-Host ("  ║{0}║" -f (' ' * $BW)) -ForegroundColor Red
+    Write-Host "  ╚$bar╝" -ForegroundColor Red
     Write-Host ""
 }
 
 function Confirm-Execute {
-    $go = Read-Host "  Type  YES  to execute, anything else to cancel"
+    $dashes = '─' * $BW
+    Write-Host "  ┌$dashes┐" -ForegroundColor DarkGray
+    Write-Host ("  │{0}│" -f "  Type  YES  to execute, or press Enter to cancel:".PadRight($BW)) -ForegroundColor White
+    Write-Host "  └$dashes┘" -ForegroundColor DarkGray
+    $go = Read-Host "  >"
     if ($go.Trim().ToUpper() -ne 'YES') {
         Write-Host ""
         Write-Host "  Cancelled — no changes made." -ForegroundColor Yellow
@@ -147,19 +183,19 @@ function Confirm-Execute {
         exit 0
     }
     Write-Host ""
-    Write-Host "  ╔══════════════════════════════════════════╗" -ForegroundColor Cyan
-    Write-Host "  ║  EXECUTING — DO NOT CLOSE THIS WINDOW   ║" -ForegroundColor Cyan
-    Write-Host "  ╚══════════════════════════════════════════╝" -ForegroundColor Cyan
+    Write-Host "  ╔$('═'*$BW)╗" -ForegroundColor Cyan
+    Write-Host ("  ║{0}║" -f "  EXECUTING — DO NOT CLOSE THIS WINDOW".PadRight($BW)) -ForegroundColor Cyan
+    Write-Host "  ╚$('═'*$BW)╝" -ForegroundColor Cyan
 }
 
 function Show-ExecuteError([string]$logFile) {
     Write-Host ""
-    Write-Host "  ╔══════════════════════════════════════════╗" -ForegroundColor Red
-    Write-Host "  ║  OPERATION FAILED                        ║" -ForegroundColor Red
-    Write-Host "  ╚══════════════════════════════════════════╝" -ForegroundColor Red
+    Write-Host "  ╔$('═'*$BW)╗" -ForegroundColor Red
+    Write-Host ("  ║{0}║" -f "  OPERATION FAILED".PadRight($BW)) -ForegroundColor Red
+    Write-Host "  ╚$('═'*$BW)╝" -ForegroundColor Red
     Write-Fail "Error: $_"
-    Write-Warn "Disk may be partially modified. Open Disk Management (diskmgmt.msc) to review."
-    Write-Host "  Log saved to: $logFile" -ForegroundColor DarkGray
+    Write-Warn "Disk may be partially modified — open diskmgmt.msc to review."
+    Write-Line "Log: $logFile" "DarkGray"
 }
 
 function Check-Adjacency([array]$parts) {
@@ -175,9 +211,8 @@ function Check-Adjacency([array]$parts) {
 # ── BANNER + AUTH ──────────────────────────────────────────────────────────────
 Show-Banner
 Write-Section "AUTHENTICATION"
-Write-Line ""
-Write-Host "  " -NoNewline
-$secPw = Read-Host "Enter password" -AsSecureString
+Write-Host ""
+$secPw = Read-Host "  Enter password" -AsSecureString
 $bstr  = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secPw)
 try   { $plain = [Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr) }
 finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
@@ -201,7 +236,7 @@ if (-not (Test-Path $LOG_DIR)) { New-Item -ItemType Directory -Path $LOG_DIR -Fo
 $logFile = Join-Path $LOG_DIR ("disk-repartition-{0}.log" -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
 Start-Transcript -Path $logFile -NoClobber | Out-Null
 Write-Host ""
-Write-Host "  Log file: $logFile" -ForegroundColor DarkGray
+Write-Line "Log file: $logFile" "DarkGray"
 
 # ── DISK DISCOVERY ─────────────────────────────────────────────────────────────
 Write-Section "DISK DISCOVERY"
@@ -225,7 +260,7 @@ try {
 $partStyle  = $disk.PartitionStyle
 $totalBytes = $disk.Size
 
-Write-OK "C: is on Disk $diskNum  |  Style: $partStyle  |  Total: $(Format-Size $totalBytes)"
+Write-OK "C: is on Disk $diskNum  ·  Style: $partStyle  ·  Total: $(Format-Size $totalBytes)"
 
 $allParts = @(Get-Partition -DiskNumber $diskNum | Sort-Object Offset)
 
@@ -236,10 +271,14 @@ Show-LayoutTable $allParts "Disk $diskNum  [$partStyle]  $(Format-Size $totalByt
 # ── MAIN MENU ──────────────────────────────────────────────────────────────────
 Write-Section "SELECT OPERATION"
 Write-Host ""
-Write-Host "    1  —  Partition disk    Create D: by shrinking C:" -ForegroundColor White
-Write-Host "    2  —  Increase C:       Take space from D:, give to C:" -ForegroundColor White
-Write-Host "    3  —  Increase D:       Take space from C:, give to D:" -ForegroundColor White
-Write-Host "    4  —  Delete D:         Delete D: entirely, extend C: with all freed space" -ForegroundColor White
+Write-Host "  ╔$('═'*$BW)╗" -ForegroundColor DarkCyan
+Write-Host ("  ║{0}║" -f (' ' * $BW)) -ForegroundColor DarkCyan
+Write-Host ("  ║{0}║" -f "  [ 1 ]  Partition disk    Create D: by shrinking C:".PadRight($BW)) -ForegroundColor White
+Write-Host ("  ║{0}║" -f "  [ 2 ]  Increase C:       Take space from D:, give to C:".PadRight($BW)) -ForegroundColor White
+Write-Host ("  ║{0}║" -f "  [ 3 ]  Increase D:       Take space from C:, give to D:".PadRight($BW)) -ForegroundColor White
+Write-Host ("  ║{0}║" -f "  [ 4 ]  Delete D:         Delete D:, extend C: to maximum".PadRight($BW)) -ForegroundColor White
+Write-Host ("  ║{0}║" -f (' ' * $BW)) -ForegroundColor DarkCyan
+Write-Host "  ╚$('═'*$BW)╝" -ForegroundColor DarkCyan
 Write-Host ""
 
 $menuChoice = 0
@@ -248,7 +287,7 @@ do {
     $parsed = 0
     $valid  = [int]::TryParse($raw, [ref]$parsed) -and $parsed -ge 1 -and $parsed -le 4
     if ($valid) { $menuChoice = $parsed }
-    else { Write-Host "  [!!] Enter 1, 2, 3, or 4." -ForegroundColor Yellow }
+    else { Write-Warn "Enter 1, 2, 3, or 4." }
 } while (-not $valid)
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -282,10 +321,10 @@ if ($menuChoice -eq 1) {
     }
 
     $maxNewDGB = [int][Math]::Floor($maxShrinkBytes / 1GB)
-    Write-Line ""
-    Write-Line "C:  current size  $cTotalGB GB   (free: $cFreeGB GB)" "White"
+    Write-Host ""
+    Write-Line "C:  current size $cTotalGB GB   (free: $cFreeGB GB)" "White"
     Write-Line "Maximum new D: size: $maxNewDGB GB" "White"
-    Write-Line ""
+    Write-Host ""
 
     $newDGB = 0
     do {
@@ -293,7 +332,7 @@ if ($menuChoice -eq 1) {
         $parsed = 0
         $valid  = [int]::TryParse($raw.Trim(), [ref]$parsed) -and $parsed -ge 1 -and $parsed -le $maxNewDGB
         if ($valid) { $newDGB = $parsed }
-        else { Write-Host "  [!!] Enter a whole number between 1 and $maxNewDGB." -ForegroundColor Yellow }
+        else { Write-Warn "Enter a whole number between 1 and $maxNewDGB." }
     } while (-not $valid)
 
     $newDBytes = [int64]$newDGB * 1GB
@@ -304,26 +343,25 @@ if ($menuChoice -eq 1) {
     Write-Host ""
     Write-Host "  Steps that WILL be executed:" -ForegroundColor White
     Write-Host ""
-    Write-Host "    1/3  SHRINK  C: from $cTotalGB GB  to  $newCGB GB  (-$newDGB GB)" -ForegroundColor Yellow
-    Write-Host "    2/3  CREATE  new D: partition ($newDGB GB)" -ForegroundColor Green
-    Write-Host "    3/3  FORMAT  new D: as NTFS, label: DATA" -ForegroundColor Green
+    Write-Host "    1/3  SHRINK  C: from $cTotalGB GB  →  $newCGB GB  (−$newDGB GB)" -ForegroundColor Yellow
+    Write-Host "    2/3  CREATE  new D: partition  ($newDGB GB)" -ForegroundColor Green
+    Write-Host "    3/3  FORMAT  D: as NTFS, label: DATA" -ForegroundColor Green
     Write-Host ""
-    Write-Host "  ┌──────────────┬────────────────────────────────────┐" -ForegroundColor DarkGray
-    Write-Host "  │              │  BEFORE             AFTER          │" -ForegroundColor DarkGray
-    Write-Host "  ├──────────────┼────────────────────────────────────┤" -ForegroundColor DarkGray
-    Write-Host ("  │  C: drive    │  {0,7} GB   →   {1,7} GB  (-{2} GB){3}│" -f $cTotalGB, $newCGB, $newDGB, (' ' * [Math]::Max(0, 3 - "$newDGB".Length))) -ForegroundColor Cyan
-    Write-Host ("  │  D: drive    │  {0,7}      →   {1,7} GB  (new)  {2}│" -f "--", $newDGB, '   ') -ForegroundColor Green
-    Write-Host "  └──────────────┴────────────────────────────────────┘" -ForegroundColor DarkGray
+    Write-Host "  ┌──────────────┬─────────────────────────────────────┐" -ForegroundColor DarkGray
+    Write-Host "  │              │  BEFORE              AFTER           │" -ForegroundColor DarkGray
+    Write-Host "  ├──────────────┼─────────────────────────────────────┤" -ForegroundColor DarkGray
+    Write-Host ("  │  C: drive    │  {0,8} GB   →   {1,8} GB  (−{2} GB){3}│" -f $cTotalGB, $newCGB, $newDGB, (' ' * [Math]::Max(0, 3 - "$newDGB".Length))) -ForegroundColor Cyan
+    Write-Host ("  │  D: drive    │  {0,8}      →   {1,8} GB  (new)   {2}│" -f "--", $newDGB, '  ') -ForegroundColor Green
+    Write-Host "  └──────────────┴─────────────────────────────────────┘" -ForegroundColor DarkGray
     Write-Host ""
-    Write-Host "  Disk: $diskNum  |  Partition style: $partStyle  |  Total: $(Format-Size $totalBytes)" -ForegroundColor DarkGray
+    Write-Line "Disk: $diskNum  ·  Style: $partStyle  ·  Total: $(Format-Size $totalBytes)" "DarkGray"
 
     Write-Section "CONFIRMATION"
     Write-Host ""
     Confirm-Execute
 
     try {
-        Write-Host ""
-        Write-Host "  ── [1/3] Shrinking C: to $newCGB GB ..." -ForegroundColor Cyan
+        Write-Step 1 3 "Shrinking C: to $newCGB GB ..."
         $targetC = $newCBytes
         if ($targetC -lt $sup.SizeMin) { throw "Target C: size is below Windows minimum. Choose a smaller D: size." }
         if ($targetC -gt $sup.SizeMax) { $targetC = $sup.SizeMax }
@@ -331,14 +369,12 @@ if ($menuChoice -eq 1) {
         Start-Sleep -Milliseconds 1500
         Write-OK "C: shrunk to $(Format-Size $targetC)."
 
-        Write-Host ""
-        Write-Host "  ── [2/3] Creating new D: partition ..." -ForegroundColor Cyan
+        Write-Step 2 3 "Creating new D: partition ..."
         $newD = New-Partition -DiskNumber $diskNum -UseMaximumSize -DriveLetter D -ErrorAction Stop
         Start-Sleep -Milliseconds 1000
         Write-OK "New D: created: $(Format-Size $newD.Size)"
 
-        Write-Host ""
-        Write-Host "  ── [3/3] Formatting D: as NTFS (label: DATA) ..." -ForegroundColor Cyan
+        Write-Step 3 3 "Formatting D: as NTFS (label: DATA) ..."
         Format-Volume -DriveLetter D -FileSystem NTFS -NewFileSystemLabel 'DATA' -Confirm:$false -ErrorAction Stop | Out-Null
         Write-OK "D: formatted as NTFS, label: DATA."
 
@@ -379,10 +415,10 @@ if ($menuChoice -eq 1) {
     $dUsedGB    = [Math]::Round($dUsedBytes / 1GB, 2)
 
     Write-Section "TRANSFER AMOUNT"
-    Write-Line ""
-    Write-Line "C:  current size  $cTotalGB GB   (free: $cFreeGB GB)" "White"
-    Write-Line "D:  current size  $dTotalGB GB   (used: $dUsedGB GB)" "White"
-    Write-Line ""
+    Write-Host ""
+    Write-Line "C:  current size $cTotalGB GB   (free: $cFreeGB GB)" "White"
+    Write-Line "D:  current size $dTotalGB GB   (used: $dUsedGB GB)" "White"
+    Write-Host ""
 
     $minDBytes     = $dUsedBytes + ([int64]$MIN_D_KEEP_GB * 1GB)
     $maxTransBytes = $dPart.Size - $minDBytes
@@ -395,7 +431,7 @@ if ($menuChoice -eq 1) {
 
     $maxTransGB = [int][Math]::Floor($maxTransBytes / 1GB)
     Write-Line "Maximum transferable: $maxTransGB GB  (D: keeps at least $MIN_D_KEEP_GB GB)" "White"
-    Write-Line ""
+    Write-Host ""
 
     $transferGB = 0
     do {
@@ -403,7 +439,7 @@ if ($menuChoice -eq 1) {
         $parsed = 0
         $valid  = [int]::TryParse($raw.Trim(), [ref]$parsed) -and $parsed -ge 1 -and $parsed -le $maxTransGB
         if ($valid) { $transferGB = $parsed }
-        else { Write-Host "  [!!] Enter a whole number between 1 and $maxTransGB." -ForegroundColor Yellow }
+        else { Write-Warn "Enter a whole number between 1 and $maxTransGB." }
     } while (-not $valid)
 
     $transferBytes = [int64]$transferGB * 1GB
@@ -419,18 +455,18 @@ if ($menuChoice -eq 1) {
     Write-Host "  Steps that WILL be executed:" -ForegroundColor White
     Write-Host ""
     Write-Host "    1/4  DELETE  D: partition entirely ($dTotalGB GB)" -ForegroundColor Yellow
-    Write-Host "    2/4  EXTEND  C: from $cTotalGB GB  to  $newCGB GB  (+$transferGB GB)" -ForegroundColor Green
+    Write-Host "    2/4  EXTEND  C: from $cTotalGB GB  →  $newCGB GB  (+$transferGB GB)" -ForegroundColor Green
     Write-Host "    3/4  CREATE  new D: partition ($newDGB GB, remaining space)" -ForegroundColor Green
-    Write-Host "    4/4  FORMAT  new D: as NTFS, label: DATA" -ForegroundColor Green
+    Write-Host "    4/4  FORMAT  D: as NTFS, label: DATA" -ForegroundColor Green
     Write-Host ""
-    Write-Host "  ┌──────────────┬────────────────────────────────────┐" -ForegroundColor DarkGray
-    Write-Host "  │              │  BEFORE             AFTER          │" -ForegroundColor DarkGray
-    Write-Host "  ├──────────────┼────────────────────────────────────┤" -ForegroundColor DarkGray
-    Write-Host ("  │  C: drive    │  {0,7} GB   →   {1,7} GB  (+{2} GB){3}│" -f $cTotalGB, $newCGB, $transferGB, (' ' * [Math]::Max(0, 3 - "$transferGB".Length))) -ForegroundColor Cyan
-    Write-Host ("  │  D: drive    │  {0,7} GB   →   {1,7} GB  (-{2} GB){3}│" -f $dTotalGB, $newDGB, $transferGB, (' ' * [Math]::Max(0, 3 - "$transferGB".Length))) -ForegroundColor Yellow
-    Write-Host "  └──────────────┴────────────────────────────────────┘" -ForegroundColor DarkGray
+    Write-Host "  ┌──────────────┬─────────────────────────────────────┐" -ForegroundColor DarkGray
+    Write-Host "  │              │  BEFORE              AFTER           │" -ForegroundColor DarkGray
+    Write-Host "  ├──────────────┼─────────────────────────────────────┤" -ForegroundColor DarkGray
+    Write-Host ("  │  C: drive    │  {0,8} GB   →   {1,8} GB  (+{2} GB){3}│" -f $cTotalGB, $newCGB, $transferGB, (' ' * [Math]::Max(0, 3 - "$transferGB".Length))) -ForegroundColor Cyan
+    Write-Host ("  │  D: drive    │  {0,8} GB   →   {1,8} GB  (−{2} GB){3}│" -f $dTotalGB, $newDGB, $transferGB, (' ' * [Math]::Max(0, 3 - "$transferGB".Length))) -ForegroundColor Yellow
+    Write-Host "  └──────────────┴─────────────────────────────────────┘" -ForegroundColor DarkGray
     Write-Host ""
-    Write-Host "  Disk: $diskNum  |  Partition style: $partStyle  |  Total: $(Format-Size $totalBytes)" -ForegroundColor DarkGray
+    Write-Line "Disk: $diskNum  ·  Style: $partStyle  ·  Total: $(Format-Size $totalBytes)" "DarkGray"
 
     Write-Section "CONFIRMATION"
     Write-Host ""
@@ -442,14 +478,12 @@ if ($menuChoice -eq 1) {
     Confirm-Execute
 
     try {
-        Write-Host ""
-        Write-Host "  ── [1/4] Removing D: partition ($dTotalGB GB) ..." -ForegroundColor Cyan
+        Write-Step 1 4 "Removing D: partition ($dTotalGB GB) ..."
         Remove-Partition -DiskNumber $diskNum -PartitionNumber $dPart.PartitionNumber -Confirm:$false -ErrorAction Stop
         Start-Sleep -Milliseconds 1500
         Write-OK "D: partition deleted."
 
-        Write-Host ""
-        Write-Host "  ── [2/4] Extending C: to $newCGB GB ..." -ForegroundColor Cyan
+        Write-Step 2 4 "Extending C: to $newCGB GB ..."
         $sup = Get-PartitionSupportedSize -DriveLetter C -ErrorAction Stop
         Write-Line "Windows C: limits — min: $(Format-Size $sup.SizeMin)  max: $(Format-Size $sup.SizeMax)" "DarkGray"
         $targetC = $newCBytes
@@ -459,14 +493,12 @@ if ($menuChoice -eq 1) {
         Start-Sleep -Milliseconds 1000
         Write-OK "C: extended to $(Format-Size $targetC)."
 
-        Write-Host ""
-        Write-Host "  ── [3/4] Creating new D: partition ..." -ForegroundColor Cyan
+        Write-Step 3 4 "Creating new D: partition ..."
         $newD = New-Partition -DiskNumber $diskNum -UseMaximumSize -DriveLetter D -ErrorAction Stop
         Start-Sleep -Milliseconds 1000
         Write-OK "New D: created: $(Format-Size $newD.Size)"
 
-        Write-Host ""
-        Write-Host "  ── [4/4] Formatting D: as NTFS (label: DATA) ..." -ForegroundColor Cyan
+        Write-Step 4 4 "Formatting D: as NTFS (label: DATA) ..."
         Format-Volume -DriveLetter D -FileSystem NTFS -NewFileSystemLabel 'DATA' -Confirm:$false -ErrorAction Stop | Out-Null
         Write-OK "D: formatted as NTFS, label: DATA."
 
@@ -508,10 +540,10 @@ if ($menuChoice -eq 1) {
     $dUsedGB    = [Math]::Round($dUsedBytes / 1GB, 2)
 
     Write-Section "TRANSFER AMOUNT"
-    Write-Line ""
-    Write-Line "C:  current size  $cTotalGB GB   (used: $cUsedGB GB, free: $cFreeGB GB)" "White"
-    Write-Line "D:  current size  $dTotalGB GB   (used: $dUsedGB GB)" "White"
-    Write-Line ""
+    Write-Host ""
+    Write-Line "C:  current size $cTotalGB GB   (used: $cUsedGB GB, free: $cFreeGB GB)" "White"
+    Write-Line "D:  current size $dTotalGB GB   (used: $dUsedGB GB)" "White"
+    Write-Host ""
 
     try {
         $supC = Get-PartitionSupportedSize -DriveLetter C -ErrorAction Stop
@@ -529,7 +561,7 @@ if ($menuChoice -eq 1) {
 
     $maxTransGB = [int][Math]::Floor($maxShrinkBytes / 1GB)
     Write-Line "Maximum transferable from C: to D:: $maxTransGB GB" "White"
-    Write-Line ""
+    Write-Host ""
 
     $transferGB = 0
     do {
@@ -537,7 +569,7 @@ if ($menuChoice -eq 1) {
         $parsed = 0
         $valid  = [int]::TryParse($raw.Trim(), [ref]$parsed) -and $parsed -ge 1 -and $parsed -le $maxTransGB
         if ($valid) { $transferGB = $parsed }
-        else { Write-Host "  [!!] Enter a whole number between 1 and $maxTransGB." -ForegroundColor Yellow }
+        else { Write-Warn "Enter a whole number between 1 and $maxTransGB." }
     } while (-not $valid)
 
     $transferBytes = [int64]$transferGB * 1GB
@@ -552,19 +584,19 @@ if ($menuChoice -eq 1) {
 
     Write-Host "  Steps that WILL be executed:" -ForegroundColor White
     Write-Host ""
-    Write-Host "    1/4  SHRINK  C: from $cTotalGB GB  to  $newCGB GB  (-$transferGB GB)" -ForegroundColor Yellow
+    Write-Host "    1/4  SHRINK  C: from $cTotalGB GB  →  $newCGB GB  (−$transferGB GB)" -ForegroundColor Yellow
     Write-Host "    2/4  DELETE  D: partition entirely ($dTotalGB GB)" -ForegroundColor Yellow
     Write-Host "    3/4  CREATE  new D: partition ($newDGB GB, all remaining space)" -ForegroundColor Green
-    Write-Host "    4/4  FORMAT  new D: as NTFS, label: DATA" -ForegroundColor Green
+    Write-Host "    4/4  FORMAT  D: as NTFS, label: DATA" -ForegroundColor Green
     Write-Host ""
-    Write-Host "  ┌──────────────┬────────────────────────────────────┐" -ForegroundColor DarkGray
-    Write-Host "  │              │  BEFORE             AFTER          │" -ForegroundColor DarkGray
-    Write-Host "  ├──────────────┼────────────────────────────────────┤" -ForegroundColor DarkGray
-    Write-Host ("  │  C: drive    │  {0,7} GB   →   {1,7} GB  (-{2} GB){3}│" -f $cTotalGB, $newCGB, $transferGB, (' ' * [Math]::Max(0, 3 - "$transferGB".Length))) -ForegroundColor Cyan
-    Write-Host ("  │  D: drive    │  {0,7} GB   →   {1,7} GB  (+{2} GB){3}│" -f $dTotalGB, $newDGB, $transferGB, (' ' * [Math]::Max(0, 3 - "$transferGB".Length))) -ForegroundColor Yellow
-    Write-Host "  └──────────────┴────────────────────────────────────┘" -ForegroundColor DarkGray
+    Write-Host "  ┌──────────────┬─────────────────────────────────────┐" -ForegroundColor DarkGray
+    Write-Host "  │              │  BEFORE              AFTER           │" -ForegroundColor DarkGray
+    Write-Host "  ├──────────────┼─────────────────────────────────────┤" -ForegroundColor DarkGray
+    Write-Host ("  │  C: drive    │  {0,8} GB   →   {1,8} GB  (−{2} GB){3}│" -f $cTotalGB, $newCGB, $transferGB, (' ' * [Math]::Max(0, 3 - "$transferGB".Length))) -ForegroundColor Cyan
+    Write-Host ("  │  D: drive    │  {0,8} GB   →   {1,8} GB  (+{2} GB){3}│" -f $dTotalGB, $newDGB, $transferGB, (' ' * [Math]::Max(0, 3 - "$transferGB".Length))) -ForegroundColor Yellow
+    Write-Host "  └──────────────┴─────────────────────────────────────┘" -ForegroundColor DarkGray
     Write-Host ""
-    Write-Host "  Disk: $diskNum  |  Partition style: $partStyle  |  Total: $(Format-Size $totalBytes)" -ForegroundColor DarkGray
+    Write-Line "Disk: $diskNum  ·  Style: $partStyle  ·  Total: $(Format-Size $totalBytes)" "DarkGray"
 
     Write-Section "CONFIRMATION"
     Write-Host ""
@@ -576,28 +608,24 @@ if ($menuChoice -eq 1) {
     Confirm-Execute
 
     try {
-        Write-Host ""
-        Write-Host "  ── [1/4] Shrinking C: to $newCGB GB ..." -ForegroundColor Cyan
+        Write-Step 1 4 "Shrinking C: to $newCGB GB ..."
         $targetC = $newCBytes
         if ($targetC -lt $supC.SizeMin) { throw "C: resize target is below minimum $(Format-Size $supC.SizeMin)." }
         Resize-Partition -DriveLetter C -Size $targetC -ErrorAction Stop
         Start-Sleep -Milliseconds 1500
         Write-OK "C: shrunk to $(Format-Size $targetC)."
 
-        Write-Host ""
-        Write-Host "  ── [2/4] Removing D: partition ($dTotalGB GB) ..." -ForegroundColor Cyan
+        Write-Step 2 4 "Removing D: partition ($dTotalGB GB) ..."
         Remove-Partition -DiskNumber $diskNum -PartitionNumber $dPart.PartitionNumber -Confirm:$false -ErrorAction Stop
         Start-Sleep -Milliseconds 1500
         Write-OK "D: partition deleted."
 
-        Write-Host ""
-        Write-Host "  ── [3/4] Creating new D: partition ..." -ForegroundColor Cyan
+        Write-Step 3 4 "Creating new D: partition ..."
         $newD = New-Partition -DiskNumber $diskNum -UseMaximumSize -DriveLetter D -ErrorAction Stop
         Start-Sleep -Milliseconds 1000
         Write-OK "New D: created: $(Format-Size $newD.Size)"
 
-        Write-Host ""
-        Write-Host "  ── [4/4] Formatting D: as NTFS (label: DATA) ..." -ForegroundColor Cyan
+        Write-Step 4 4 "Formatting D: as NTFS (label: DATA) ..."
         Format-Volume -DriveLetter D -FileSystem NTFS -NewFileSystemLabel 'DATA' -Confirm:$false -ErrorAction Stop | Out-Null
         Write-OK "D: formatted as NTFS, label: DATA."
 
@@ -644,16 +672,16 @@ if ($menuChoice -eq 1) {
     Write-Host "  Steps that WILL be executed:" -ForegroundColor White
     Write-Host ""
     Write-Host "    1/2  DELETE  D: partition entirely ($dTotalGB GB)" -ForegroundColor Yellow
-    Write-Host "    2/2  EXTEND  C: from $cTotalGB GB  to  ~$newCGB GB  (all available space)" -ForegroundColor Green
+    Write-Host "    2/2  EXTEND  C: from $cTotalGB GB  →  ~$newCGB GB  (all available space)" -ForegroundColor Green
     Write-Host ""
-    Write-Host "  ┌──────────────┬────────────────────────────────────┐" -ForegroundColor DarkGray
-    Write-Host "  │              │  BEFORE             AFTER          │" -ForegroundColor DarkGray
-    Write-Host "  ├──────────────┼────────────────────────────────────┤" -ForegroundColor DarkGray
-    Write-Host ("  │  C: drive    │  {0,7} GB   →  ~{1,7} GB  (+{2} GB)│" -f $cTotalGB, $newCGB, $dTotalGB) -ForegroundColor Cyan
-    Write-Host ("  │  D: drive    │  {0,7} GB   →  {1,12}         │" -f $dTotalGB, "DELETED") -ForegroundColor Yellow
-    Write-Host "  └──────────────┴────────────────────────────────────┘" -ForegroundColor DarkGray
+    Write-Host "  ┌──────────────┬─────────────────────────────────────┐" -ForegroundColor DarkGray
+    Write-Host "  │              │  BEFORE              AFTER           │" -ForegroundColor DarkGray
+    Write-Host "  ├──────────────┼─────────────────────────────────────┤" -ForegroundColor DarkGray
+    Write-Host ("  │  C: drive    │  {0,8} GB   →  ~{1,8} GB  (+{2} GB)│" -f $cTotalGB, $newCGB, $dTotalGB) -ForegroundColor Cyan
+    Write-Host ("  │  D: drive    │  {0,8} GB   →  {1,13}          │" -f $dTotalGB, "DELETED") -ForegroundColor Yellow
+    Write-Host "  └──────────────┴─────────────────────────────────────┘" -ForegroundColor DarkGray
     Write-Host ""
-    Write-Host "  Disk: $diskNum  |  Partition style: $partStyle  |  Total: $(Format-Size $totalBytes)" -ForegroundColor DarkGray
+    Write-Line "Disk: $diskNum  ·  Style: $partStyle  ·  Total: $(Format-Size $totalBytes)" "DarkGray"
 
     Write-Section "CONFIRMATION"
     Write-Host ""
@@ -665,14 +693,12 @@ if ($menuChoice -eq 1) {
     Confirm-Execute
 
     try {
-        Write-Host ""
-        Write-Host "  ── [1/2] Removing D: partition ($dTotalGB GB) ..." -ForegroundColor Cyan
+        Write-Step 1 2 "Removing D: partition ($dTotalGB GB) ..."
         Remove-Partition -DiskNumber $diskNum -PartitionNumber $dPart.PartitionNumber -Confirm:$false -ErrorAction Stop
         Start-Sleep -Milliseconds 1500
         Write-OK "D: partition deleted."
 
-        Write-Host ""
-        Write-Host "  ── [2/2] Extending C: to maximum available size ..." -ForegroundColor Cyan
+        Write-Step 2 2 "Extending C: to maximum available size ..."
         $sup = Get-PartitionSupportedSize -DriveLetter C -ErrorAction Stop
         Write-Line "Windows C: limits — min: $(Format-Size $sup.SizeMin)  max: $(Format-Size $sup.SizeMax)" "DarkGray"
         Resize-Partition -DriveLetter C -Size $sup.SizeMax -ErrorAction Stop
@@ -688,9 +714,11 @@ if ($menuChoice -eq 1) {
 
 # ── RESULTS ────────────────────────────────────────────────────────────────────
 Write-Host ""
-Write-Host "  ╔══════════════════════════════════════════╗" -ForegroundColor Green
-Write-Host "  ║  ALL STEPS COMPLETED SUCCESSFULLY        ║" -ForegroundColor Green
-Write-Host "  ╚══════════════════════════════════════════╝" -ForegroundColor Green
+Write-Host "  ╔$('═'*$BW)╗" -ForegroundColor Green
+Write-Host ("  ║{0}║" -f (' ' * $BW)) -ForegroundColor Green
+Write-Host ("  ║{0}║" -f "  ALL STEPS COMPLETED SUCCESSFULLY".PadRight($BW)) -ForegroundColor Green
+Write-Host ("  ║{0}║" -f (' ' * $BW)) -ForegroundColor Green
+Write-Host "  ╚$('═'*$BW)╝" -ForegroundColor Green
 
 try {
     $finalParts = @(Get-Partition -DiskNumber $diskNum | Sort-Object Offset)
@@ -700,8 +728,7 @@ try {
 }
 
 # ── RESTART ────────────────────────────────────────────────────────────────────
-Write-Host ""
-Write-Host "  Log saved to: $logFile" -ForegroundColor DarkGray
+Write-Line "Log saved to: $logFile" "DarkGray"
 Write-Host ""
 Write-Host "  A restart is recommended for all changes to take full effect." -ForegroundColor Yellow
 Write-Host ""
