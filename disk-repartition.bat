@@ -2,17 +2,16 @@
 setlocal enableextensions
 title Disk Repartition Tool v2.0
 chcp 65001 >nul 2>&1
-
 set "_self=%~f0"
 
 net session >nul 2>&1
 if %errorlevel% neq 0 (
-    echo  [*] Requesting Administrator privileges...
+    echo  Requesting Administrator privileges...
     powershell -NoProfile -WindowStyle Hidden -Command "Start-Process -FilePath '%~f0' -Verb RunAs"
     exit /b 0
 )
 
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$f=[IO.File]::ReadAllText($env:_self); $m='##PS_START##'; $i=$f.IndexOf($m); if($i -lt 0){Write-Host '[ERROR] Script marker not found.' -ForegroundColor Red; Read-Host; exit 1}; Invoke-Expression $f.Substring($i+$m.Length)"
+powershell -NoProfile -Command "$lines=[IO.File]::ReadAllLines($env:_self,[Text.Encoding]::UTF8); $i=[array]::IndexOf($lines,'##PS_START##'); if($i -lt 0){Write-Host 'Marker not found' -ForegroundColor Red; pause; exit 1}; iex ($lines[($i+1)..($lines.Count-1)] -join [char]10)"
 exit /b %errorlevel%
 ##PS_START##
 Set-StrictMode -Version Latest
@@ -424,3 +423,6 @@ if ($rst.Trim().ToUpper() -eq 'Y') {
     Write-OK "Done. Please restart manually when convenient."
     Wait-Enter "Press Enter to exit"
 }
+
+# Self-cleanup of temp script file
+try { Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue } catch {}
