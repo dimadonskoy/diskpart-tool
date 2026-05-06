@@ -1,12 +1,13 @@
-﻿# Disk Repartition Tool
+# Disk Repartition Tool
 
-A single-file Windows utility that transfers free space from `D:` to `C:` — the common IT scenario where the OS drive is undersized and the data drive has room to spare. Supports both MBR and GPT (UEFI) disks with full pre-execution preview, password protection, and automatic logging.
+A single-file Windows utility for resizing C: and D: partitions. Supports creating D:, growing C:, growing D:, and deleting D: — covering the most common IT repartitioning scenarios. Works on both MBR and GPT (UEFI) disks with full pre-execution preview, password protection, and automatic logging.
 
 ---
 
 ## Features
 
 - **Single file** — one `.bat` with embedded PowerShell, nothing to install
+- **Four operations** — create D:, grow C: from D:, grow D: from C:, delete D: entirely
 - **MBR and GPT support** — works with both legacy BIOS and modern UEFI partition layouts
 - **Administrator check** — verifies elevation at runtime; shows a clear error and exits if not admin
 - **Password protected** — SHA-256 hashed, plaintext zeroed from memory immediately after auth
@@ -23,46 +24,63 @@ A single-file Windows utility that transfers free space from `D:` to `C:` — th
 | Requirement | Detail |
 |---|---|
 | OS | Windows 10 / Windows 11 |
-| Privileges | Administrator (auto-requested via UAC) |
-| Disk layout | C: and D: must be **consecutive** partitions on the same disk |
-| D: free space | At least `transfer amount + 2 GB` must be free on D: |
+| Privileges | Administrator — must be launched via **Run as administrator** |
+| Disk layout | C: and D: must be **consecutive** partitions on the same disk (for options 2, 3, 4) |
+| D: free space | At least `transfer amount + 2 GB` must be free on D: (for option 2) |
 
 ---
 
 ## Quick Start
 
 1. Copy `disk-repartition.bat` to any location on the target machine.
-2. Double-click the file — UAC will prompt for elevation automatically.
+2. Right-click the file and choose **Run as administrator**.
 3. Enter the password (configured in `$PASS_HASH` at the top of the PowerShell section).
-4. Follow the on-screen prompts.
+4. Choose an operation from the menu and follow the on-screen prompts.
 
 > **Important:** Back up D: before running if it contains data you want to keep.
 
 ---
 
-## How It Works
+## Operations
 
-The tool walks through six stages, making no changes until you explicitly confirm:
+### Menu
 
 ```
-1. AUTHENTICATION     Admin check + password verification (SHA-256)
-2. DISK DISCOVERY     Locates C: and D:, detects MBR/GPT, verifies adjacency
-3. CURRENT LAYOUT     Displays all partitions with sizes and usage
-4. TRANSFER AMOUNT    You choose how many GB to move (1 GB increments)
-5. OPERATION PLAN     Full preview — before/after table, list of steps, data warnings
-6. CONFIRMATION       Type YES to execute (strong warning shown if D: has files)
+1 — Partition disk    Create D: by shrinking C:
+2 — Increase C:       Take space from D:, give to C:
+3 — Increase D:       Take space from C:, give to D:
+4 — Delete D:         Delete D: entirely, extend C: with all freed space
 ```
 
-Once confirmed, four operations execute in sequence:
+### Option 1 — Create D:
 
-| Step | Action |
-|------|--------|
-| 1/4 | Delete D: partition |
-| 2/4 | Extend C: into the freed space |
-| 3/4 | Create new (smaller) D: partition from remaining space |
-| 4/4 | Format new D: as NTFS with label `DATA` |
+Shrinks C: and creates a new D: partition from the freed space. Use when the machine has no D: yet.
 
-> **Why delete D: first?** Windows can only shrink a partition from its end, not its beginning. To give the space *between* C: and D: to C:, D: must be removed so C: can expand into it. A new D: is then created from whatever space remains.
+Steps: Shrink C: → Create D: → Format D: as NTFS
+
+### Option 2 — Increase C:
+
+Transfers a chosen number of GB from D: to C:. D: must have enough free space to satisfy `transfer + 2 GB` minimum.
+
+Steps: Delete D: → Extend C: → Recreate D: (smaller) → Format D: as NTFS
+
+> D: data is permanently deleted. Back up before proceeding.
+
+### Option 3 — Increase D:
+
+Shrinks C: and expands D: by that amount.
+
+Steps: Shrink C: → Delete D: → Recreate D: (larger, all remaining space) → Format D: as NTFS
+
+> D: data is permanently deleted. Back up before proceeding.
+
+### Option 4 — Delete D:
+
+Deletes D: entirely and extends C: to take all available space. Use when D: is no longer needed.
+
+Steps: Delete D: → Extend C: to maximum
+
+> D: data is permanently deleted. Back up before proceeding.
 
 ---
 
@@ -136,12 +154,12 @@ The tool will **abort without making any changes** if:
 
 - Not running as Administrator
 - The password is incorrect
-- D: is not found on the same disk as C:
-- D: is not the partition immediately after C:
-- D: does not have enough free space to satisfy `transfer + MIN_D_KEEP_GB`
+- D: is not found on the same disk as C: (options 2, 3, 4)
+- D: is not the partition immediately after C: (options 2, 3, 4)
+- D: does not have enough free space to satisfy `transfer + MIN_D_KEEP_GB` (option 2)
 - The requested C: size would exceed Windows-enforced partition limits
 
-If an error occurs **during** execution (after step 1 has already deleted D:), the tool reports the exact error, prints the log file path, and advises opening **Disk Management** (`diskmgmt.msc`) to review and manually complete the operation.
+If an error occurs **during** execution (after a delete step has already run), the tool reports the exact error, prints the log file path, and advises opening **Disk Management** (`diskmgmt.msc`) to review and manually complete the operation.
 
 ---
 
@@ -149,11 +167,11 @@ If an error occurs **during** execution (after step 1 has already deleted D:), t
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| "Not running as Administrator" | Script was launched without elevation | Right-click and choose **Run as administrator**, or let UAC prompt complete |
+| "Not running as Administrator" | Script was launched without elevation | Right-click and choose **Run as administrator** |
 | "D: is not immediately adjacent to C:" | A recovery or other partition sits between C: and D: | Use Disk Management to check layout; manual repartition may be needed |
 | "D: does not have enough free space" | D: is too full | Free up space on D: and retry |
 | C: grows less than requested | Windows clamped to its maximum supported size | Normal — Windows enforces alignment and volume constraints |
-| Tool window closes instantly | UAC was denied, or PowerShell parsing error | Right-click and choose **Run as administrator**; if the problem persists, open CMD as admin and run the `.bat` from there to see the error |
+| Tool window closes instantly | PowerShell parsing error | Open CMD as admin and run the `.bat` from there to see the error |
 | Unicode box characters appear garbled | Terminal does not support UTF-8 | Run from Windows Terminal or PowerShell 7 instead of legacy CMD |
 
 ---
@@ -163,6 +181,7 @@ If an error occurs **during** execution (after step 1 has already deleted D:), t
 ```
 disk-tools/
 ├── disk-repartition.bat              <- the tool (single file, everything inside)
+├── .gitattributes                    <- enforces CRLF line endings for .bat files
 ├── README.md
 └── CLAUDE.md                         <- guidance for Claude Code
 

@@ -5,9 +5,15 @@ chcp 65001 >nul 2>&1
 
 net session >nul 2>&1
 if %errorlevel% neq 0 (
-    echo  Requesting Administrator privileges...
-    powershell -NoProfile -WindowStyle Hidden -Command "Start-Process -FilePath '%~f0' -Verb RunAs"
-    exit /b 0
+    echo.
+    echo  ╔══════════════════════════════════════════╗
+    echo  ║  ERROR: Not running as Administrator     ║
+    echo  ╚══════════════════════════════════════════╝
+    echo.
+    echo  Right-click the file and choose "Run as administrator".
+    echo.
+    pause
+    exit /b 1
 )
 
 powershell -NoProfile -ExecutionPolicy Bypass -Command "& { $f='%~f0'; $n=(Select-String -LiteralPath $f -Encoding UTF8 -Pattern '^:##PS_START##$' | Select-Object -Last 1).LineNumber; $env:DREPT_DIR=Split-Path $f; $t=[IO.Path]::Combine($env:TEMP,'disk-repartition-tmp.ps1'); Get-Content -LiteralPath $f -Encoding UTF8 | Select-Object -Skip $n | Set-Content -Path $t -Encoding UTF8; & $t; Remove-Item $t -Force -ErrorAction SilentlyContinue }"
