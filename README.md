@@ -10,10 +10,10 @@ A single-file Windows utility that transfers free space from `D:` to `C:` — th
 - **MBR and GPT support** — works with both legacy BIOS and modern UEFI partition layouts
 - **Administrator check** — verifies elevation at runtime; shows a clear error and exits if not admin
 - **Password protected** — SHA-256 hashed, plaintext zeroed from memory immediately after auth
-- **Automatic logging** — every run is saved to a timestamped log file in `C:\ProgramData\DiskRepartition\Logs\`
+- **Automatic logging** — every run is saved to a timestamped log file in the same directory as the tool
 - **Pre-execution plan** — shows every step and a before/after size table before touching the disk
 - **Smart validation** — checks adjacency, Windows-enforced size limits, and available free space
-- **Data-loss warning** — requires typing `DELETE D DATA` if D: contains files
+- **Data-loss warning** — shows a mandatory warning with backup instructions if D: contains files; requires typing `YES` to confirm
 - **Optional restart** — offers a 5-second countdown reboot on completion
 
 ---
@@ -33,7 +33,7 @@ A single-file Windows utility that transfers free space from `D:` to `C:` — th
 
 1. Copy `disk-repartition.bat` to any location on the target machine.
 2. Double-click the file — UAC will prompt for elevation automatically.
-3. Enter the password (default: **`admin`**).
+3. Enter the password (configured in `$PASS_HASH` at the top of the PowerShell section).
 4. Follow the on-screen prompts.
 
 > **Important:** Back up D: before running if it contains data you want to keep.
@@ -50,7 +50,7 @@ The tool walks through six stages, making no changes until you explicitly confir
 3. CURRENT LAYOUT     Displays all partitions with sizes and usage
 4. TRANSFER AMOUNT    You choose how many GB to move (1 GB increments)
 5. OPERATION PLAN     Full preview — before/after table, list of steps, data warnings
-6. CONFIRMATION       Type YES (and DELETE D DATA if D: has files)
+6. CONFIRMATION       Type YES to execute (strong warning shown if D: has files)
 ```
 
 Once confirmed, four operations execute in sequence:
@@ -72,7 +72,7 @@ Every run is automatically recorded, regardless of outcome.
 
 | Item | Detail |
 |------|--------|
-| Location | `C:\ProgramData\DiskRepartition\Logs\` |
+| Location | Same directory as `disk-repartition.bat` (fallback: `C:\ProgramData\DiskRepartition\Logs\`) |
 | Filename | `disk-repartition-YYYYMMDD-HHmmss.log` |
 | Content | Full console transcript with timestamps on each section header |
 | When created | After successful authentication (failed password attempts are not logged) |
@@ -126,7 +126,7 @@ Edit `$MIN_D_KEEP_GB` (default: `2`). Minimum GB that must remain on D: after sh
 
 ### Change the log directory
 
-Edit `$LOG_DIR` (default: `C:\ProgramData\DiskRepartition\Logs`). The directory is created automatically if it does not exist.
+By default, logs are written to the same directory as the `.bat` file (passed via `$env:DREPT_DIR` at launch). To override, edit `$LOG_DIR` in the PowerShell section. The directory is created automatically if it does not exist.
 
 ---
 
@@ -153,7 +153,7 @@ If an error occurs **during** execution (after step 1 has already deleted D:), t
 | "D: is not immediately adjacent to C:" | A recovery or other partition sits between C: and D: | Use Disk Management to check layout; manual repartition may be needed |
 | "D: does not have enough free space" | D: is too full | Free up space on D: and retry |
 | C: grows less than requested | Windows clamped to its maximum supported size | Normal — Windows enforces alignment and volume constraints |
-| Tool window closes instantly | UAC was denied | Right-click the file and choose **Run as administrator** |
+| Tool window closes instantly | UAC was denied, or PowerShell parsing error | Right-click and choose **Run as administrator**; if the problem persists, open CMD as admin and run the `.bat` from there to see the error |
 | Unicode box characters appear garbled | Terminal does not support UTF-8 | Run from Windows Terminal or PowerShell 7 instead of legacy CMD |
 
 ---
@@ -166,7 +166,7 @@ disk-tools/
 ├── README.md
 └── CLAUDE.md                         <- guidance for Claude Code
 
-C:\ProgramData\DiskRepartition\Logs\  <- log output (created at runtime)
+disk-repartition-YYYYMMDD-HHmmss.log  <- log output (same dir as the tool)
 ```
 
 ---
