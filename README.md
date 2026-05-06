@@ -1,47 +1,50 @@
-# Disk Repartition Tool
+# 💾 Disk Repartition Tool
 
-A single-file Windows utility for resizing C: and D: partitions. Supports creating D:, growing C:, growing D:, and deleting D: — covering the most common IT repartitioning scenarios. Works on both MBR and GPT (UEFI) disks with full pre-execution preview, password protection, and automatic logging.
-
----
-
-## Features
-
-- **Single file** — one `.bat` with embedded PowerShell, nothing to install
-- **Four operations** — create D:, grow C: from D:, grow D: from C:, delete D: entirely
-- **MBR and GPT support** — works with both legacy BIOS and modern UEFI partition layouts
-- **Administrator check** — verifies elevation at runtime; shows a clear error and exits if not admin
-- **Password protected** — SHA-256 hashed, plaintext zeroed from memory immediately after auth
-- **Automatic logging** — every run is saved to a timestamped log file in the same directory as the tool
-- **Pre-execution plan** — shows every step and a before/after size table before touching the disk
-- **Smart validation** — checks adjacency, Windows-enforced size limits, and available free space
-- **Data-loss warning** — shows a mandatory warning with backup instructions if D: contains files; requires typing `YES` to confirm
-- **Optional restart** — offers a 5-second countdown reboot on completion
+> A single-file Windows utility for resizing C: and D: partitions — covering the most common IT repartitioning scenarios.  
+> Works on **MBR and GPT (UEFI)** disks with full pre-execution preview, password protection, and automatic logging.
 
 ---
 
-## Requirements
+## ✨ Features
+
+| | Feature | Description |
+|---|---|---|
+| 📦 | **Single file** | One `.bat` with embedded PowerShell — nothing to install |
+| 🔧 | **Four operations** | Create D:, grow C:, grow D:, delete D: |
+| 🖥️ | **MBR & GPT support** | Works with both legacy BIOS and modern UEFI layouts |
+| 🔒 | **Password protected** | SHA-256 hashed; plaintext zeroed from memory after auth |
+| 🛡️ | **Administrator check** | Verifies elevation at runtime; exits cleanly if not admin |
+| 📋 | **Pre-execution plan** | Shows every step and a before/after size table before touching the disk |
+| ⚠️ | **Data-loss warning** | Mandatory warning + backup instructions when D: has data; requires typing `YES` |
+| 📝 | **Automatic logging** | Every run saved to a timestamped log file next to the tool |
+| ✅ | **Smart validation** | Checks adjacency, Windows size limits, and available free space |
+| 🔄 | **Optional restart** | Offers a 5-second countdown reboot on completion |
+
+---
+
+## 📋 Requirements
 
 | Requirement | Detail |
 |---|---|
-| OS | Windows 10 / Windows 11 |
-| Privileges | Administrator — must be launched via **Run as administrator** |
-| Disk layout | C: and D: must be **consecutive** partitions on the same disk (for options 2, 3, 4) |
-| D: free space | At least `transfer amount + 2 GB` must be free on D: (for option 2) |
+| 🖥️ OS | Windows 10 / Windows 11 |
+| 👑 Privileges | Administrator — must be launched via **Run as administrator** |
+| 💽 Disk layout | C: and D: must be **consecutive** partitions on the same disk (options 2, 3, 4) |
+| 💿 D: free space | At least `transfer amount + 2 GB` must be free on D: (option 2) |
 
 ---
 
-## Quick Start
+## 🚀 Quick Start
 
 1. Copy `disk-repartition.bat` to any location on the target machine.
-2. Right-click the file and choose **Run as administrator**.
+2. Right-click the file → choose **Run as administrator**.
 3. Enter the password (configured in `$PASS_HASH` at the top of the PowerShell section).
 4. Choose an operation from the menu and follow the on-screen prompts.
 
-> **Important:** Back up D: before running if it contains data you want to keep.
+> ⚠️ **Important:** Back up D: before running if it contains data you want to keep.
 
 ---
 
-## Operations
+## 🔧 Operations
 
 ### Menu
 
@@ -52,57 +55,76 @@ A single-file Windows utility for resizing C: and D: partitions. Supports creati
 4 — Delete D:         Delete D: entirely, extend C: with all freed space
 ```
 
-### Option 1 — Create D:
+---
 
-Shrinks C: and creates a new D: partition from the freed space. Use when the machine has no D: yet.
+### 1️⃣ Create D:
 
-Steps: Shrink C: → Create D: → Format D: as NTFS
+Shrinks C: and creates a new D: partition from the freed space.  
+Use when the machine has **no D: yet**.
 
-### Option 2 — Increase C:
-
-Transfers a chosen number of GB from D: to C:. D: must have enough free space to satisfy `transfer + 2 GB` minimum.
-
-Steps: Delete D: → Extend C: → Recreate D: (smaller) → Format D: as NTFS
-
-> D: data is permanently deleted. Back up before proceeding.
-
-### Option 3 — Increase D:
-
-Shrinks C: and expands D: by that amount.
-
-Steps: Shrink C: → Delete D: → Recreate D: (larger, all remaining space) → Format D: as NTFS
-
-> D: data is permanently deleted. Back up before proceeding.
-
-### Option 4 — Delete D:
-
-Deletes D: entirely and extends C: to take all available space. Use when D: is no longer needed.
-
-Steps: Delete D: → Extend C: to maximum
-
-> D: data is permanently deleted. Back up before proceeding.
+```
+Shrink C:  →  Create D:  →  Format D: (NTFS)
+```
 
 ---
 
-## Logging
+### 2️⃣ Increase C:
+
+Transfers a chosen number of GB from D: to C:.  
+D: must have at least `transfer + 2 GB` free.
+
+```
+Delete D:  →  Extend C:  →  Recreate D: (smaller)  →  Format D: (NTFS)
+```
+
+> 🔴 **D: data is permanently deleted. Back up before proceeding.**
+
+---
+
+### 3️⃣ Increase D:
+
+Shrinks C: and expands D: by that amount.
+
+```
+Shrink C:  →  Delete D:  →  Recreate D: (larger)  →  Format D: (NTFS)
+```
+
+> 🔴 **D: data is permanently deleted. Back up before proceeding.**
+
+---
+
+### 4️⃣ Delete D:
+
+Deletes D: entirely and extends C: to take all available space.  
+Use when D: is **no longer needed**.
+
+```
+Delete D:  →  Extend C: to maximum
+```
+
+> 🔴 **D: data is permanently deleted. Back up before proceeding.**
+
+---
+
+## 📝 Logging
 
 Every run is automatically recorded, regardless of outcome.
 
 | Item | Detail |
 |------|--------|
-| Location | Same directory as `disk-repartition.bat` (fallback: `C:\ProgramData\DiskRepartition\Logs\`) |
-| Filename | `disk-repartition-YYYYMMDD-HHmmss.log` |
-| Content | Full console transcript with timestamps on each section header |
-| When created | After successful authentication (failed password attempts are not logged) |
-| On failure | Log path is printed in the error screen for easy retrieval |
+| 📁 Location | Same directory as `disk-repartition.bat` (fallback: `C:\ProgramData\DiskRepartition\Logs\`) |
+| 🏷️ Filename | `disk-repartition-YYYYMMDD-HHmmss.log` |
+| 📄 Content | Full console transcript with timestamps on each section header |
+| ⏱️ When created | After successful authentication (failed password attempts are not logged) |
+| ❌ On failure | Log path is printed in the error screen for easy retrieval |
 
-Logs accumulate over time. Clean them up manually if needed.
+> Logs accumulate over time — clean them up manually if needed.
 
 ---
 
-## Supported Disk Layouts
+## 💽 Supported Disk Layouts
 
-### GPT / UEFI (typical modern system)
+### 🆕 GPT / UEFI (modern system)
 
 ```
 +-------------+--------------------------+----------------------+
@@ -110,23 +132,23 @@ Logs accumulate over time. Clean them up manually if needed.
 +-------------+--------------------------+----------------------+
 ```
 
-### MBR / BIOS (legacy system)
+### 🕰️ MBR / BIOS (legacy system)
 
 ```
-+------------------+----------------------+----------------------+
-| System (~500 MB) | Windows C: (e.g. 80 GB)| Data D: (e.g. 400 GB)|
-+------------------+----------------------+----------------------+
++------------------+-------------------------+----------------------+
+| System (~500 MB) | Windows C: (e.g. 80 GB) | Data D: (e.g. 400 GB)|
++------------------+-------------------------+----------------------+
 ```
 
-The tool aborts safely if any partition sits **between** C: and D: (e.g. a recovery partition in that position), as that layout cannot be handled without additional steps.
+> ⛔ The tool aborts safely if any partition sits **between** C: and D: (e.g. a recovery partition), as that layout cannot be handled without additional steps.
 
 ---
 
-## Configuration
+## ⚙️ Configuration
 
-All settings are at the top of the PowerShell section in `disk-repartition.bat`:
+All settings are at the top of the PowerShell section inside `disk-repartition.bat`.
 
-### Change the password
+### 🔑 Change the password
 
 1. Generate a SHA-256 hash of your new password:
    ```powershell
@@ -138,58 +160,60 @@ All settings are at the top of the PowerShell section in `disk-repartition.bat`:
    ```
 2. Replace the value of `$PASS_HASH` in the file with the output.
 
-### Change the minimum D: reserve
+### 📏 Change the minimum D: reserve
 
-Edit `$MIN_D_KEEP_GB` (default: `2`). Minimum GB that must remain on D: after shrinking, beyond whatever is currently used.
+Edit `$MIN_D_KEEP_GB` (default: `2`).  
+Minimum GB that must remain on D: after shrinking, beyond whatever is currently used.
 
-### Change the log directory
+### 📂 Change the log directory
 
-By default, logs are written to the same directory as the `.bat` file (passed via `$env:DREPT_DIR` at launch). To override, edit `$LOG_DIR` in the PowerShell section. The directory is created automatically if it does not exist.
+By default, logs are written next to the `.bat` file (via `$env:DREPT_DIR`).  
+To override, edit `$LOG_DIR` in the PowerShell section — the directory is created automatically.
 
 ---
 
-## Safety
+## 🛡️ Safety
 
 The tool will **abort without making any changes** if:
 
-- Not running as Administrator
-- The password is incorrect
-- D: is not found on the same disk as C: (options 2, 3, 4)
-- D: is not the partition immediately after C: (options 2, 3, 4)
-- D: does not have enough free space to satisfy `transfer + MIN_D_KEEP_GB` (option 2)
-- The requested C: size would exceed Windows-enforced partition limits
+- ❌ Not running as Administrator
+- ❌ The password is incorrect
+- ❌ D: is not found on the same disk as C: (options 2, 3, 4)
+- ❌ D: is not the partition immediately after C: (options 2, 3, 4)
+- ❌ D: does not have enough free space for `transfer + MIN_D_KEEP_GB` (option 2)
+- ❌ The requested C: size would exceed Windows-enforced partition limits
 
-If an error occurs **during** execution (after a delete step has already run), the tool reports the exact error, prints the log file path, and advises opening **Disk Management** (`diskmgmt.msc`) to review and manually complete the operation.
+> If an error occurs **during** execution (after a delete step has already run), the tool reports the exact error, prints the log path, and advises opening **Disk Management** (`diskmgmt.msc`) to review and manually complete the operation.
 
 ---
 
-## Troubleshooting
+## 🔍 Troubleshooting
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| "Not running as Administrator" | Script was launched without elevation | Right-click and choose **Run as administrator** |
-| "D: is not immediately adjacent to C:" | A recovery or other partition sits between C: and D: | Use Disk Management to check layout; manual repartition may be needed |
-| "D: does not have enough free space" | D: is too full | Free up space on D: and retry |
-| C: grows less than requested | Windows clamped to its maximum supported size | Normal — Windows enforces alignment and volume constraints |
-| Tool window closes instantly | PowerShell parsing error | Open CMD as admin and run the `.bat` from there to see the error |
-| Unicode box characters appear garbled | Terminal does not support UTF-8 | Run from Windows Terminal or PowerShell 7 instead of legacy CMD |
+| 🚫 "Not running as Administrator" | Script launched without elevation | Right-click → **Run as administrator** |
+| 🚫 "D: is not immediately adjacent to C:" | A recovery partition sits between C: and D: | Check layout in Disk Management; manual steps may be needed |
+| 🚫 "D: does not have enough free space" | D: is too full | Free up space on D: and retry |
+| 📉 C: grows less than requested | Windows clamped the size | Normal — Windows enforces alignment and volume constraints |
+| 💨 Tool window closes instantly | PowerShell parsing error | Open CMD as admin and run the `.bat` directly to see the error |
+| 🔣 Unicode box characters appear garbled | Terminal does not support UTF-8 | Run from Windows Terminal or PowerShell 7 instead of legacy CMD |
 
 ---
 
-## File Structure
+## 📁 File Structure
 
 ```
 disk-tools/
-├── disk-repartition.bat              <- the tool (single file, everything inside)
-├── .gitattributes                    <- enforces CRLF line endings for .bat files
-├── README.md
-└── CLAUDE.md                         <- guidance for Claude Code
+├── 🔧 disk-repartition.bat              ← the tool (single file, everything inside)
+├── ⚙️  .gitattributes                   ← enforces CRLF line endings for .bat files
+├── 📖 README.md
+└── 🤖 CLAUDE.md                         ← guidance for Claude Code
 
-disk-repartition-YYYYMMDD-HHmmss.log  <- log output (same dir as the tool)
+📝 disk-repartition-YYYYMMDD-HHmmss.log  ← log output (same dir as the tool)
 ```
 
 ---
 
-## License
+## 📜 License
 
 Internal IT tool — not intended for public distribution.
