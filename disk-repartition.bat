@@ -2,7 +2,6 @@
 setlocal enableextensions
 title Disk Repartition Tool v2.0
 chcp 65001 >nul 2>&1
-set "_self=%~f0"
 
 net session >nul 2>&1
 if %errorlevel% neq 0 (
@@ -11,9 +10,9 @@ if %errorlevel% neq 0 (
     exit /b 0
 )
 
-powershell -NoProfile -Command "$lines=[IO.File]::ReadAllLines($env:_self,[Text.Encoding]::UTF8); $i=[array]::IndexOf($lines,'##PS_START##'); if($i -lt 0){Write-Host 'Marker not found' -ForegroundColor Red; pause; exit 1}; iex ($lines[($i+1)..($lines.Count-1)] -join [char]10)"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "& { $f='%~f0'; $n=(Select-String -LiteralPath $f -Pattern '^:##PS_START##$' | Select-Object -Last 1).LineNumber; iex ((Get-Content -LiteralPath $f | Select-Object -Skip $n) -join [char]10) }"
 exit /b %errorlevel%
-##PS_START##
+:##PS_START##
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
