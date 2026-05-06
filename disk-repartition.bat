@@ -233,15 +233,16 @@ Write-Host ""
 Write-Host "    1  —  Partition disk    Create D: by shrinking C:" -ForegroundColor White
 Write-Host "    2  —  Increase C:       Take space from D:, give to C:" -ForegroundColor White
 Write-Host "    3  —  Increase D:       Take space from C:, give to D:" -ForegroundColor White
+Write-Host "    4  —  Delete D:         Delete D: entirely, extend C: with all freed space" -ForegroundColor White
 Write-Host ""
 
 $menuChoice = 0
 do {
-    $raw    = (Read-Host "  Enter choice [1-3]").Trim()
+    $raw    = (Read-Host "  Enter choice [1-4]").Trim()
     $parsed = 0
-    $valid  = [int]::TryParse($raw, [ref]$parsed) -and $parsed -ge 1 -and $parsed -le 3
+    $valid  = [int]::TryParse($raw, [ref]$parsed) -and $parsed -ge 1 -and $parsed -le 4
     if ($valid) { $menuChoice = $parsed }
-    else { Write-Host "  [!!] Enter 1, 2, or 3." -ForegroundColor Yellow }
+    else { Write-Host "  [!!] Enter 1, 2, 3, or 4." -ForegroundColor Yellow }
 } while (-not $valid)
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -593,6 +594,84 @@ if ($menuChoice -eq 1) {
         Write-Host "  ── [4/4] Formatting D: as NTFS (label: DATA) ..." -ForegroundColor Cyan
         Format-Volume -DriveLetter D -FileSystem NTFS -NewFileSystemLabel 'DATA' -Confirm:$false -ErrorAction Stop | Out-Null
         Write-OK "D: formatted as NTFS, label: DATA."
+
+    } catch {
+        Show-ExecuteError $logFile
+        Stop-Log; Wait-Enter "Press Enter to exit"
+        exit 1
+    }
+
+# ══════════════════════════════════════════════════════════════════════════════
+# OPTION 4 — DELETE D: AND EXTEND C:
+# ══════════════════════════════════════════════════════════════════════════════
+} elseif ($menuChoice -eq 4) {
+
+    Write-Section "DELETE D: AND EXTEND C:"
+
+    $dPart = $allParts | Where-Object { $_.DriveLetter -eq 'D' } | Select-Object -First 1
+    if (-not $dPart) {
+        Write-Fail "D: not found on Disk $diskNum."
+        Stop-Log; Wait-Enter; exit 1
+    }
+    Write-OK "D: found on Disk $diskNum"
+
+    if (-not (Check-Adjacency $allParts)) {
+        Write-Fail "D: is not immediately adjacent to C: on disk."
+        Write-Warn "This tool requires C: and D: to be consecutive partitions."
+        Write-Warn "Check layout with Disk Management (diskmgmt.msc)."
+        Stop-Log; Wait-Enter; exit 1
+    }
+    Write-OK "C: and D: are adjacent — layout is compatible with $partStyle disk."
+
+    $cUsage    = Get-VolumeUsage 'C'; $dUsage = Get-VolumeUsage 'D'
+    $cTotalGB  = [Math]::Round($cPart.Size / 1GB, 2)
+    $cFreeGB   = [Math]::Round($cUsage.Free / 1GB, 2)
+    $dTotalGB  = [Math]::Round($dPart.Size / 1GB, 2)
+    $dUsedGB   = [Math]::Round($dUsage.Used / 1GB, 2)
+    $dUsedBytes = $dUsage.Used
+    $newCGB    = [Math]::Round(($cPart.Size + $dPart.Size) / 1GB, 2)
+
+    Write-Section "OPERATION PLAN"
+    Write-Host ""
+    if ($dUsedBytes -gt 0) { Show-DataLossWarning "D" $dUsedGB }
+
+    Write-Host "  Steps that WILL be executed:" -ForegroundColor White
+    Write-Host ""
+    Write-Host "    1/2  DELETE  D: partition entirely ($dTotalGB GB)" -ForegroundColor Yellow
+    Write-Host "    2/2  EXTEND  C: from $cTotalGB GB  to  ~$newCGB GB  (all available space)" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "  ┌──────────────┬────────────────────────────────────┐" -ForegroundColor DarkGray
+    Write-Host "  │              │  BEFORE             AFTER          │" -ForegroundColor DarkGray
+    Write-Host "  ├──────────────┼────────────────────────────────────┤" -ForegroundColor DarkGray
+    Write-Host ("  │  C: drive    │  {0,7} GB   →  ~{1,7} GB  (+{2} GB)│" -f $cTotalGB, $newCGB, $dTotalGB) -ForegroundColor Cyan
+    Write-Host ("  │  D: drive    │  {0,7} GB   →  {1,12}         │" -f $dTotalGB, "DELETED") -ForegroundColor Yellow
+    Write-Host "  └──────────────┴────────────────────────────────────┘" -ForegroundColor DarkGray
+    Write-Host ""
+    Write-Host "  Disk: $diskNum  |  Partition style: $partStyle  |  Total: $(Format-Size $totalBytes)" -ForegroundColor DarkGray
+
+    Write-Section "CONFIRMATION"
+    Write-Host ""
+    if ($dUsedBytes -gt 0) {
+        Write-Host "  D: has $dUsedGB GB of data that will be PERMANENTLY DELETED." -ForegroundColor Red
+        Write-Host "  There is NO undo. Back up D: before proceeding if needed." -ForegroundColor Yellow
+        Write-Host ""
+    }
+    Confirm-Execute
+
+    try {
+        Write-Host ""
+        Write-Host "  ── [1/2] Removing D: partition ($dTotalGB GB) ..." -ForegroundColor Cyan
+        Remove-Partition -DiskNumber $diskNum -PartitionNumber $dPart.PartitionNumber -Confirm:$false -ErrorAction Stop
+        Start-Sleep -Milliseconds 1500
+        Write-OK "D: partition deleted."
+
+        Write-Host ""
+        Write-Host "  ── [2/2] Extending C: to maximum available size ..." -ForegroundColor Cyan
+        $sup = Get-PartitionSupportedSize -DriveLetter C -ErrorAction Stop
+        Write-Line "Windows C: limits — min: $(Format-Size $sup.SizeMin)  max: $(Format-Size $sup.SizeMax)" "DarkGray"
+        Resize-Partition -DriveLetter C -Size $sup.SizeMax -ErrorAction Stop
+        Start-Sleep -Milliseconds 1000
+        Write-OK "C: extended to $(Format-Size $sup.SizeMax)."
 
     } catch {
         Show-ExecuteError $logFile
