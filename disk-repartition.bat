@@ -10,7 +10,7 @@ if %errorlevel% neq 0 (
     exit /b 0
 )
 
-powershell -NoProfile -ExecutionPolicy Bypass -Command "& { $f='%~f0'; $n=(Select-String -LiteralPath $f -Pattern '^:##PS_START##$' | Select-Object -Last 1).LineNumber; iex ((Get-Content -LiteralPath $f | Select-Object -Skip $n) -join [char]10) }"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "& { $f='%~f0'; $n=(Select-String -LiteralPath $f -Encoding UTF8 -Pattern '^:##PS_START##$' | Select-Object -Last 1).LineNumber; $t=[IO.Path]::Combine($env:TEMP,'disk-repartition-tmp.ps1'); Get-Content -LiteralPath $f -Encoding UTF8 | Select-Object -Skip $n | Set-Content -Path $t -Encoding UTF8; & $t; Remove-Item $t -Force -ErrorAction SilentlyContinue }"
 exit /b %errorlevel%
 :##PS_START##
 Set-StrictMode -Version Latest
@@ -39,7 +39,7 @@ if (-not $isAdmin) {
 # To generate a new hash:
 #   [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash(
 #       [Text.Encoding]::UTF8.GetBytes('YourPassword'))).Replace('-','').ToLower()
-$PASS_HASH    = '8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918'
+$PASS_HASH    = 'ec8f5df50eaef3d3713968fd02fb1d0f746e50cde87b8160357de503fcb9c174'
 $MIN_D_KEEP_GB = 2   # minimum GB that must remain on D: after shrinking
 $LOG_DIR      = "$env:ProgramData\DiskRepartition\Logs"
 
