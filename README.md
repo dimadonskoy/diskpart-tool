@@ -1,6 +1,6 @@
 ﻿# Disk Repartition Tool
 
-A single-file Windows utility that transfers free space from `D:` to `C:` — the common IT scenario where the OS drive is undersized and the data drive has room to spare. Supports both MBR and GPT (UEFI) disks with full pre-execution preview and password protection.
+A single-file Windows utility that transfers free space from `D:` to `C:` — the common IT scenario where the OS drive is undersized and the data drive has room to spare. Supports both MBR and GPT (UEFI) disks with full pre-execution preview, password protection, and automatic logging.
 
 ---
 
@@ -8,7 +8,9 @@ A single-file Windows utility that transfers free space from `D:` to `C:` — th
 
 - **Single file** — one `.bat` with embedded PowerShell, nothing to install
 - **MBR and GPT support** — works with both legacy BIOS and modern UEFI partition layouts
+- **Administrator check** — verifies elevation at runtime; shows a clear error and exits if not admin
 - **Password protected** — SHA-256 hashed, plaintext zeroed from memory immediately after auth
+- **Automatic logging** — every run is saved to a timestamped log file in `C:\ProgramData\DiskRepartition\Logs\`
 - **Pre-execution plan** — shows every step and a before/after size table before touching the disk
 - **Smart validation** — checks adjacency, Windows-enforced size limits, and available free space
 - **Data-loss warning** — requires typing `DELETE D DATA` if D: contains files
@@ -43,7 +45,7 @@ A single-file Windows utility that transfers free space from `D:` to `C:` — th
 The tool walks through six stages, making no changes until you explicitly confirm:
 
 ```
-1. AUTHENTICATION     Password check (SHA-256)
+1. AUTHENTICATION     Admin check + password verification (SHA-256)
 2. DISK DISCOVERY     Locates C: and D:, detects MBR/GPT, verifies adjacency
 3. CURRENT LAYOUT     Displays all partitions with sizes and usage
 4. TRANSFER AMOUNT    You choose how many GB to move (1 GB increments)
@@ -61,6 +63,22 @@ Once confirmed, four operations execute in sequence:
 | 4/4 | Format new D: as NTFS with label `DATA` |
 
 > **Why delete D: first?** Windows can only shrink a partition from its end, not its beginning. To give the space *between* C: and D: to C:, D: must be removed so C: can expand into it. A new D: is then created from whatever space remains.
+
+---
+
+## Logging
+
+Every run is automatically recorded, regardless of outcome.
+
+| Item | Detail |
+|------|--------|
+| Location | `C:\ProgramData\DiskRepartition\Logs\` |
+| Filename | `disk-repartition-YYYYMMDD-HHmmss.log` |
+| Content | Full console transcript with timestamps on each section header |
+| When created | After successful authentication (failed password attempts are not logged) |
+| On failure | Log path is printed in the error screen for easy retrieval |
+
+Logs accumulate over time. Clean them up manually if needed.
 
 ---
 
@@ -88,7 +106,7 @@ The tool aborts safely if any partition sits **between** C: and D: (e.g. a recov
 
 ## Configuration
 
-Both settings are at the top of the PowerShell section in `disk-repartition.bat`:
+All settings are at the top of the PowerShell section in `disk-repartition.bat`:
 
 ### Change the password
 
@@ -104,7 +122,11 @@ Both settings are at the top of the PowerShell section in `disk-repartition.bat`
 
 ### Change the minimum D: reserve
 
-Edit `$MIN_D_KEEP_GB` (default: `2`). This is the minimum number of GB that must remain on D: after shrinking, beyond whatever is currently used.
+Edit `$MIN_D_KEEP_GB` (default: `2`). Minimum GB that must remain on D: after shrinking, beyond whatever is currently used.
+
+### Change the log directory
+
+Edit `$LOG_DIR` (default: `C:\ProgramData\DiskRepartition\Logs`). The directory is created automatically if it does not exist.
 
 ---
 
@@ -112,13 +134,14 @@ Edit `$MIN_D_KEEP_GB` (default: `2`). This is the minimum number of GB that must
 
 The tool will **abort without making any changes** if:
 
+- Not running as Administrator
 - The password is incorrect
 - D: is not found on the same disk as C:
 - D: is not the partition immediately after C:
 - D: does not have enough free space to satisfy `transfer + MIN_D_KEEP_GB`
 - The requested C: size would exceed Windows-enforced partition limits
 
-If an error occurs **during** execution (after step 1 has already deleted D:), the tool reports the exact error and advises opening **Disk Management** (`diskmgmt.msc`) to review and manually complete the operation.
+If an error occurs **during** execution (after step 1 has already deleted D:), the tool reports the exact error, prints the log file path, and advises opening **Disk Management** (`diskmgmt.msc`) to review and manually complete the operation.
 
 ---
 
@@ -126,6 +149,7 @@ If an error occurs **during** execution (after step 1 has already deleted D:), t
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
+| "Not running as Administrator" | Script was launched without elevation | Right-click and choose **Run as administrator**, or let UAC prompt complete |
 | "D: is not immediately adjacent to C:" | A recovery or other partition sits between C: and D: | Use Disk Management to check layout; manual repartition may be needed |
 | "D: does not have enough free space" | D: is too full | Free up space on D: and retry |
 | C: grows less than requested | Windows clamped to its maximum supported size | Normal — Windows enforces alignment and volume constraints |
@@ -138,9 +162,11 @@ If an error occurs **during** execution (after step 1 has already deleted D:), t
 
 ```
 disk-tools/
-├── disk-repartition.bat   <- the tool (single file, everything inside)
+├── disk-repartition.bat              <- the tool (single file, everything inside)
 ├── README.md
-└── CLAUDE.md              <- guidance for Claude Code
+└── CLAUDE.md                         <- guidance for Claude Code
+
+C:\ProgramData\DiskRepartition\Logs\  <- log output (created at runtime)
 ```
 
 ---

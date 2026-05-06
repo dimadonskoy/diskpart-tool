@@ -20,6 +20,22 @@ $ErrorActionPreference = 'Stop'
 
 try { $Host.UI.RawUI.WindowTitle = 'Disk Repartition Tool v2.0' } catch {}
 
+# ── ADMINISTRATOR CHECK ────────────────────────────────────────────────────────
+$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+    [Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $isAdmin) {
+    Write-Host ""
+    Write-Host "  ╔══════════════════════════════════════════╗" -ForegroundColor Red
+    Write-Host "  ║  ERROR: Not running as Administrator     ║" -ForegroundColor Red
+    Write-Host "  ╚══════════════════════════════════════════╝" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "  This tool requires Administrator privileges." -ForegroundColor Yellow
+    Write-Host "  Right-click the file and choose 'Run as administrator'." -ForegroundColor Yellow
+    Write-Host ""
+    Read-Host "  Press Enter to exit" | Out-Null
+    exit 1
+}
+
 # ── CONFIGURATION ──────────────────────────────────────────────────────────────
 # Default password: admin
 # To generate a new hash:
@@ -27,6 +43,7 @@ try { $Host.UI.RawUI.WindowTitle = 'Disk Repartition Tool v2.0' } catch {}
 #       [Text.Encoding]::UTF8.GetBytes('YourPassword'))).Replace('-','').ToLower()
 $PASS_HASH    = '8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918'
 $MIN_D_KEEP_GB = 2   # minimum GB that must remain on D: after shrinking
+$LOG_DIR      = "$env:ProgramData\DiskRepartition\Logs"
 
 # ── UI HELPERS ─────────────────────────────────────────────────────────────────
 function Show-Banner {
@@ -41,9 +58,10 @@ function Show-Banner {
 }
 
 function Write-Section([string]$title) {
+    $ts  = Get-Date -Format 'HH:mm:ss'
     $pad = [string]('─' * [Math]::Max(2, 46 - $title.Length))
     Write-Host ""
-    Write-Host "  ┌─ $title $pad" -ForegroundColor DarkCyan
+    Write-Host "  ┌─ [$ts] $title $pad" -ForegroundColor DarkCyan
 }
 
 function Write-Line([string]$msg, [string]$color = 'White') {
@@ -56,6 +74,10 @@ function Write-Fail([string]$msg) { Write-Host "  │  [XX] $msg" -ForegroundCol
 function Wait-Enter([string]$prompt = 'Press Enter to exit') {
     Write-Host ""
     Read-Host "  $prompt" | Out-Null
+}
+
+function Stop-Log {
+    try { Stop-Transcript -ErrorAction SilentlyContinue } catch {}
 }
 
 function Format-Size([int64]$b) {
@@ -98,6 +120,13 @@ if ($hash -ne $PASS_HASH) {
 }
 Write-OK "Authenticated."
 
+# ── LOGGING ────────────────────────────────────────────────────────────────────
+if (-not (Test-Path $LOG_DIR)) { New-Item -ItemType Directory -Path $LOG_DIR -Force | Out-Null }
+$logFile = Join-Path $LOG_DIR ("disk-repartition-{0}.log" -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
+Start-Transcript -Path $logFile -NoClobber | Out-Null
+Write-Host ""
+Write-Host "  Log file: $logFile" -ForegroundColor DarkGray
+
 # ── DISK DISCOVERY ─────────────────────────────────────────────────────────────
 Write-Section "DISK DISCOVERY"
 
@@ -105,7 +134,7 @@ try {
     $cPart = Get-Partition -DriveLetter C -ErrorAction Stop
 } catch {
     Write-Fail "Cannot locate C: partition: $_"
-    Wait-Enter; exit 1
+    Stop-Log; Wait-Enter; exit 1
 }
 
 $diskNum = $cPart.DiskNumber
@@ -114,7 +143,7 @@ try {
     $disk = Get-Disk -Number $diskNum -ErrorAction Stop
 } catch {
     Write-Fail "Cannot access Disk $diskNum`: $_"
-    Wait-Enter; exit 1
+    Stop-Log; Wait-Enter; exit 1
 }
 
 $partStyle  = $disk.PartitionStyle   # MBR or GPT
@@ -127,7 +156,7 @@ $allParts = @(Get-Partition -DiskNumber $diskNum | Sort-Object Offset)
 $dPart = $allParts | Where-Object { $_.DriveLetter -eq 'D' } | Select-Object -First 1
 if (-not $dPart) {
     Write-Fail "D: not found on Disk $diskNum. This tool requires a D: partition to transfer space from."
-    Wait-Enter; exit 1
+    Stop-Log; Wait-Enter; exit 1
 }
 Write-OK "D: found on Disk $diskNum"
 
@@ -140,14 +169,14 @@ for ($i = 0; $i -lt $allParts.Count; $i++) {
 
 if ($cIdx -lt 0) {
     Write-Fail "Could not locate C: in the partition table."
-    Wait-Enter; exit 1
+    Stop-Log; Wait-Enter; exit 1
 }
 
 if ($dIdx -ne ($cIdx + 1)) {
     Write-Fail "D: is not immediately adjacent to C: on disk (index C=$cIdx, D=$dIdx)."
     Write-Warn "This tool requires C: and D: to be consecutive partitions."
     Write-Warn "Check layout with Disk Management (diskmgmt.msc)."
-    Wait-Enter; exit 1
+    Stop-Log; Wait-Enter; exit 1
 }
 Write-OK "C: and D: are adjacent — layout is compatible with $partStyle disk."
 
@@ -202,7 +231,7 @@ $maxTransBytes = $dPart.Size - $minDBytes
 if ($maxTransBytes -lt 1GB) {
     Write-Fail "D: does not have enough free space. Need to keep $MIN_D_KEEP_GB GB minimum on D: after shrink."
     Write-Warn "D: used: $dUsedGB GB — try freeing space on D: first."
-    Wait-Enter; exit 1
+    Stop-Log; Wait-Enter; exit 1
 }
 
 $maxTransGB = [int][Math]::Floor($maxTransBytes / 1GB)
@@ -264,7 +293,7 @@ if ($dUsedBytes -gt 0) {
     if ($ack.Trim() -ne 'DELETE D DATA') {
         Write-Host ""
         Write-Host "  Cancelled — no changes made." -ForegroundColor Yellow
-        Wait-Enter "Press Enter to exit"
+        Stop-Log; Wait-Enter "Press Enter to exit"
         exit 0
     }
     Write-Host ""
@@ -274,7 +303,7 @@ $go = Read-Host "  Type  YES  to execute, anything else to cancel"
 if ($go.Trim().ToUpper() -ne 'YES') {
     Write-Host ""
     Write-Host "  Cancelled — no changes made." -ForegroundColor Yellow
-    Wait-Enter "Press Enter to exit"
+    Stop-Log; Wait-Enter "Press Enter to exit"
     exit 0
 }
 
@@ -283,8 +312,6 @@ Write-Host ""
 Write-Host "  ╔══════════════════════════════════════════╗" -ForegroundColor Cyan
 Write-Host "  ║  EXECUTING — DO NOT CLOSE THIS WINDOW   ║" -ForegroundColor Cyan
 Write-Host "  ╚══════════════════════════════════════════╝" -ForegroundColor Cyan
-
-$stepFailed = $false
 
 try {
 
@@ -330,14 +357,14 @@ try {
     Write-OK "D: formatted as NTFS, label: DATA."
 
 } catch {
-    $stepFailed = $true
     Write-Host ""
     Write-Host "  ╔══════════════════════════════════════════╗" -ForegroundColor Red
     Write-Host "  ║  OPERATION FAILED                        ║" -ForegroundColor Red
     Write-Host "  ╚══════════════════════════════════════════╝" -ForegroundColor Red
     Write-Fail "Error: $_"
     Write-Warn "Disk may be partially modified. Open Disk Management (diskmgmt.msc) to review."
-    Wait-Enter "Press Enter to exit"
+    Write-Host "  Log saved to: $logFile" -ForegroundColor DarkGray
+    Stop-Log; Wait-Enter "Press Enter to exit"
     exit 1
 }
 
@@ -376,9 +403,13 @@ try {
 
 # ── RESTART ────────────────────────────────────────────────────────────────────
 Write-Host ""
+Write-Host "  Log saved to: $logFile" -ForegroundColor DarkGray
+Write-Host ""
 Write-Host "  A restart is recommended for all changes to take full effect." -ForegroundColor Yellow
 Write-Host ""
 $rst = Read-Host "  Restart computer now? [Y/N]"
+
+Stop-Log
 
 if ($rst.Trim().ToUpper() -eq 'Y') {
     Write-Host ""
